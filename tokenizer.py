@@ -45,11 +45,12 @@ class BPETokenizer:
     def __init__(self, tokenizer_config: TokenizerConfig):
         self.tokenizer_config = tokenizer_config
         self.vocab = []
-        self.merges = []
+        self.merges = {}
         self.special_tokens = tokenizer_config.special_tokens
         self.vocab_size = tokenizer_config.vocab_size
         self.min_frequency = tokenizer_config.min_frequency
         self.max_length = tokenizer_config.max_length
+        self.vocab_id_dict = {}
 
     def get_all_pair_freq(self, freq_dict: dict) -> dict:
         """Get all pair frequencies from the frequency dictionary."""
@@ -94,7 +95,7 @@ class BPETokenizer:
         Simplified version of GPT-2 ByteLevel pre_tokenizer.pre_tokenize_str.
         Returns list of (token, (start, end)) pairs.
         """
-        return re.findall(r'\w+|[^\w\s]|[\s]+', text)
+        return re.findall(r"\w+|[^\w\s]|[\s]+", text)
 
     def train(self, texts: List[str]) -> None:
         """Train the tokenizer on the given texts."""
@@ -123,11 +124,38 @@ class BPETokenizer:
             self.vocab.append(new_token)
             freq_dict = self.update_freq_dict(freq_dict, pair, new_token)
             # add new token to merges
-            self.merges.append((pair, freq))
+            self.merges[pair] = freq
+        self.vocab_id_dict = {word: idx for idx, word in enumerate(self.vocab)}
+
+    def tokens_to_id(self, tokens: List[str]):
+        return [
+            self.vocab_id_dict[token] for token in tokens if token in self.vocab_id_dict
+        ]
+
+    def tokenize_word(self, word: str) -> List[int]:
+        tokens = [c for c in word]
+        while True:
+            new_tokens = []
+            max_freq = 0
+            max_pair_idx = -1
+            for i in range(len(tokens) - 1):
+                if (tokens[i], tokens[i + 1]) in self.merges:
+                    max_freq = max(max_freq, self.merges[(tokens[i], tokens[i + 1])])
+                    max_pair_idx = i
+            if max_pair_idx == -1:
+                break
+            tokens = (
+                tokens[:max_pair_idx]
+                + [(tokens[max_pair_idx] + tokens[max_pair_idx + 1])]
+                + tokens[max_pair_idx + 2 :]
+            )
+        return tokens
 
     def tokenize(self, text: str) -> List[str]:
         """Tokenize the given text."""
-        pass
+        words = self.pre_tokenize_str(text)
+        tokenized_text = [self.tokens_to_id(self.tokenize_word(word)) for word in words]
+        return tokenized_text
 
     def detokenize(self, tokens: List[str]) -> str:
         """Detokenize the given tokens."""
@@ -152,6 +180,7 @@ if __name__ == "__main__":
     ]
 
     tokenizer.train(corpus)
-    print ("Vocab Size:", len(tokenizer.vocab))
+    print("Vocab Size:", len(tokenizer.vocab))
     print("Vocab:", tokenizer.vocab)
     print("Merges:", tokenizer.merges)
+    print(tokenizer.tokenize(corpus[0]))
